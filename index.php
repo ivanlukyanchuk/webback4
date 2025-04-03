@@ -1,148 +1,159 @@
 <?php
-// Устанавливаем кодировку UTF-8
 header('Content-Type: text/html; charset=UTF-8');
 
-// Если метод запроса GET, просто отображаем форму
-if ($_SERVER['REQUEST_METHOD'] == 'GET') {
-    // Если есть параметр save, выводим сообщение об успешном сохранении
-    if (!empty($_GET['save'])) {
-        print('Спасибо, результаты сохранены.');
-    }
-    // Подключаем файл с формой
-    include('form.php');
-    exit();
-}
-
-// Иначе, если запрос был методом POST, проверяем данные и сохраняем их в БД
-
-// Инициализируем массив для ошибок
-$errors = [];
-
-// Проверка поля ФИО
-if (empty($_POST['full_name'])) {
-    $errors[] = 'Заполните ФИО.';
-} elseif (!preg_match('/^[a-zA-Zа-яА-Я\s]{1,150}$/u', $_POST['full_name'])) {
-    $errors[] = 'ФИО должно содержать только буквы и пробелы и быть не длиннее 150 символов.';
-}
-
-// Проверка поля Телефон
-if (empty($_POST['phone'])) {
-    $errors[] = 'Заполните телефон.';
-} elseif (!preg_match('/^\+?\d{10,15}$/', $_POST['phone'])) {
-    $errors[] = 'Телефон должен быть в формате +7XXXXXXXXXX или XXXXXXXXXX.';
-}
-
-// Проверка поля Email
-if (empty($_POST['email'])) {
-    $errors[] = 'Заполните email.';
-} elseif (!filter_var($_POST['email'], FILTER_VALIDATE_EMAIL)) {
-    $errors[] = 'Некорректный email.';
-}
-
-// Проверка поля Дата рождения
-if (empty($_POST['dob'])) {
-    $errors[] = 'Заполните дату рождения.';
-} elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $_POST['dob'])) {
-    $errors[] = 'Некорректный формат даты рождения.';
-}
-
-// Проверка поля Пол
-if (empty($_POST['gender'])) {
-    $errors[] = 'Выберите пол.';
-} elseif (!in_array($_POST['gender'], ['male', 'female'])) {
-    $errors[] = 'Некорректное значение пола.';
-}
-
-// Проверка поля Языки программирования
-if (empty($_POST['languages'])) {
-    $errors[] = 'Выберите хотя бы один язык программирования.';
-} else {
-    $allowedLanguages = ['Pascal', 'C', 'C++', 'JavaScript', 'PHP', 'Python', 'Java', 'Haskell', 'Clojure', 'Prolog', 'Scala', 'Go'];
-    foreach ($_POST['languages'] as $language) {
-        if (!in_array($language, $allowedLanguages)) {
-            $errors[] = 'Некорректный язык программирования.';
-            break;
-        }
-    }
-}
-
-// Проверка поля Биография
-if (empty($_POST['bio'])) {
-    $errors[] = 'Заполните биографию.';
-}
-
-// Проверка чекбокса "С контрактом ознакомлен"
-if (empty($_POST['contract'])) {
-    $errors[] = 'Необходимо ознакомиться с контрактом.';
-}
-
-// Если есть ошибки, выводим их и завершаем выполнение скрипта
-if (!empty($errors)) {
-    foreach ($errors as $error) {
-        print($error . '<br>');
-    }
-    exit();
-}
-
-// Подключение к базе данных
-$user = 'u68581'; // Замените на ваш логин
-$pass = '4027467'; // Замените на ваш пароль
-$db = new PDO('mysql:host=localhost;dbname=u68581', $user, $pass, [
+$dsn = 'mysql:host=localhost;dbname=u68581;charset=utf8';
+$user = 'u68581';
+$pass = '4027467';
+$options = [
     PDO::ATTR_PERSISTENT => true,
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-]);
+];
 
 try {
-    // Начало транзакции
-    $db->beginTransaction();
+    $db = new PDO($dsn, $user, $pass, $options);
+} catch (PDOException $e) {
+    die('Ошибка подключения к базе данных: ' . $e->getMessage());
+}
 
-    // Сохранение основной информации о заявке
-    $stmt = $db->prepare("INSERT INTO applications (full_name, phone, email, birth_date, gender, bio) 
-                          VALUES (:full_name, :phone, :email, :birth_date, :gender, :bio)");
-    $stmt->execute([
-        ':full_name' => $_POST['full_name'],
-        ':phone' => $_POST['phone'],
-        ':email' => $_POST['email'],
-        ':birth_date' => $_POST['dob'],
-        ':gender' => $_POST['gender'],
-        ':bio' => $_POST['bio']
-    ]);
+if ($_SERVER['REQUEST_METHOD'] == 'GET') {
+    $messages = [];
 
-    // Получение ID последней вставленной записи
-    $application_id = $db->lastInsertId();
-
-    // Сохранение выбранных языков программирования
-    $stmt = $db->prepare("SELECT id FROM languages WHERE name = :name");
-    $insertLang = $db->prepare("INSERT INTO languages (name) VALUES (:name)");
-    $linkStmt = $db->prepare("INSERT INTO application_languages (application_id, language_id) 
-                              VALUES (:application_id, :language_id)");
-
-    foreach ($_POST['languages'] as $language) {
-        $stmt->execute([':name' => $language]);
-        $languageData = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$languageData) {
-            $insertLang->execute([':name' => $language]);
-            $language_id = $db->lastInsertId();
-        } else {
-            $language_id = $languageData['id'];
-        }
-
-        $linkStmt->execute([
-            ':application_id' => $application_id,
-            ':language_id' => $language_id
-        ]);
+    if (!empty($_COOKIE['save'])) {
+        setcookie('save', '', time() - 3600);
+        $messages[] = 'Спасибо, результаты сохранены.';
     }
 
-    // Завершение транзакции
-    $db->commit();
+    $errors = [
+        'fio' => !empty($_COOKIE['fio_error']),
+        'phone' => !empty($_COOKIE['phone_error']),
+        'email' => !empty($_COOKIE['email_error']),
+        'dob' => !empty($_COOKIE['dob_error']),
+        'gender' => !empty($_COOKIE['gender_error']),
+        'languages' => !empty($_COOKIE['languages_error']),
+        'bio' => !empty($_COOKIE['bio_error']),
+        'contract' => !empty($_COOKIE['contract_error'])
+    ];
 
-    // Перенаправление на страницу с сообщением об успешном сохранении
-    header('Location: ?save=1');
-} catch (PDOException $e) {
-    // Откат транзакции в случае ошибки
-    $db->rollBack();
-    print('Ошибка при сохранении данных: ' . $e->getMessage());
-    exit();
+    foreach ($errors as $key => $error) {
+        if ($error) {
+            setcookie("{$key}_error", '', time() - 3600);
+            $messages[] = "<div class='error'>Ошибка в поле: {$key}</div>";
+        }
+    }
+
+    $values = [
+        'fio' => $_COOKIE['fio_value'] ?? '',
+        'phone' => $_COOKIE['phone_value'] ?? '',
+        'email' => $_COOKIE['email_value'] ?? '',
+        'dob' => $_COOKIE['dob_value'] ?? '',
+        'gender' => $_COOKIE['gender_value'] ?? '',
+        'languages' => !empty($_COOKIE['languages_value']) ? json_decode($_COOKIE['languages_value'], true) : [],
+        'bio' => $_COOKIE['bio_value'] ?? '',
+        'contract' => !empty($_COOKIE['contract_value'])
+    ];
+
+    include('form.php');
+} else {
+    $errors = false;
+
+    function validate($field, $pattern)
+    {
+        global $errors;
+        if (empty($_POST[$field]) || !preg_match($pattern, $_POST[$field])) {
+            setcookie("{$field}_error", '1', time() + 24 * 60 * 60);
+            $errors = true;
+        }
+        setcookie("{$field}_value", $_POST[$field] ?? '', time() + 365 * 24 * 60 * 60);
+    }
+
+    validate('fio', '/^[a-zA-Zа-яА-Я\s]{1,150}$/u');
+    validate('phone', '/^\+?\d{10,15}$/');
+    validate('email', '/^[^@]+@[^@]+\.[a-zA-Z]{2,}$/');
+    validate('dob', '/^\d{4}-\d{2}-\d{2}$/');
+
+    if (empty($_POST['gender']) || !in_array($_POST['gender'], ['male', 'female'])) {
+        setcookie('gender_error', '1', time() + 24 * 60 * 60);
+        $errors = true;
+    }
+    setcookie('gender_value', $_POST['gender'] ?? '', time() + 365 * 24 * 60 * 60);
+
+    if (empty($_POST['languages'])) {
+        setcookie('languages_error', '1', time() + 24 * 60 * 60);
+        $errors = true;
+    }
+    setcookie('languages_value', json_encode($_POST['languages'] ?? []), time() + 365 * 24 * 60 * 60);
+
+    if (empty($_POST['bio'])) {
+        setcookie('bio_error', '1', time() + 24 * 60 * 60);
+        $errors = true;
+    }
+    setcookie('bio_value', $_POST['bio'] ?? '', time() + 365 * 24 * 60 * 60);
+
+    if (empty($_POST['contract'])) {
+        setcookie('contract_error', '1', time() + 24 * 60 * 60);
+        $errors = true;
+    }
+    setcookie('contract_value', $_POST['contract'] ?? '', time() + 365 * 24 * 60 * 60);
+
+    if ($errors) {
+        header('Location: index.php');
+        exit();
+    }
+
+    setcookie('fio_error', '', time() - 3600);
+    setcookie('phone_error', '', time() - 3600);
+    setcookie('email_error', '', time() - 3600);
+    setcookie('dob_error', '', time() - 3600);
+    setcookie('gender_error', '', time() - 3600);
+    setcookie('languages_error', '', time() - 3600);
+    setcookie('bio_error', '', time() - 3600);
+    setcookie('contract_error', '', time() - 3600);
+
+    try {
+        $db->beginTransaction();
+
+        $stmt = $db->prepare("INSERT INTO applications (full_name, phone, email, birth_date, gender, bio, contract) 
+                              VALUES (:fio, :phone, :email, :dob, :gender, :bio, :contract)");
+        $stmt->execute([
+            ':fio' => $_POST['fio'],
+            ':phone' => $_POST['phone'],
+            ':email' => $_POST['email'],
+            ':dob' => $_POST['dob'],
+            ':gender' => $_POST['gender'],
+            ':bio' => $_POST['bio'],
+            ':contract' => isset($_POST['contract']) ? 1 : 0
+        ]);
+
+        $application_id = $db->lastInsertId();
+
+        $stmt = $db->prepare("SELECT id FROM languages WHERE name = :name");
+        $insertLang = $db->prepare("INSERT INTO languages (name) VALUES (:name)");
+        $linkStmt = $db->prepare("INSERT INTO application_languages (application_id, language_id) 
+                                  VALUES (:application_id, :language_id)");
+
+        foreach ($_POST['languages'] as $language) {
+            $stmt->execute([':name' => $language]);
+            $languageData = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$languageData) {
+                $insertLang->execute([':name' => $language]);
+                $language_id = $db->lastInsertId();
+            } else {
+                $language_id = $languageData['id'];
+            }
+
+            $linkStmt->execute([
+                ':application_id' => $application_id,
+                ':language_id' => $language_id
+            ]);
+        }
+
+        $db->commit();
+        setcookie('save', '1', time() + 365 * 24 * 60 * 60);
+        header('Location: index.php');
+    } catch (PDOException $e) {
+        $db->rollBack();
+        die('Ошибка при сохранении данных: ' . $e->getMessage());
+    }
 }
 ?>
